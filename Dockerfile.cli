@@ -1,0 +1,12 @@
+# Build stage
+FROM golang:1.21-alpine AS builder
+WORKDIR /app
+COPY client .
+RUN go get github.com/gorilla/websocket
+RUN go build -o hyperspeed-cli main.go
+
+# Run stage
+FROM alpine:latest
+WORKDIR /app
+COPY --from=builder /app/hyperspeed-cli .
+ENTRYPOINT ["./hyperspeed-cli"]
