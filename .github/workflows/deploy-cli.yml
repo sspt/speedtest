@@ -32,7 +32,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}/cli
+          images: ghcr.io/${{ github.repository }}/hyperspeed-cli
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5

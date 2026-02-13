@@ -41,46 +41,17 @@ hostFlag := flag.String("host", "127.0.0.1", "Target server host")
 portFlag := flag.Int("port", 8080, "Target server port")
 streamsFlag := flag.Int("streams", 16, "Number of concurrent streams")
 durationFlag := flag.Int("duration", 10, "Duration of each phase in seconds")
-	cFlag := flag.Int("c", 16, "Number of concurrent streams (shorthand)")
-	dFlag := flag.Int("d", 10, "Duration of each phase in seconds (shorthand)")
-	iFlag := flag.Bool("interactive", false, "Interactive mode: prompts for config")
 
-	flag.Parse()
+flag.Parse()
 
-	targetHost = *hostFlag
-	targetPort = *portFlag
-	
-	// Handle Shorthand overrides or defaults
-	concurrentStreams = *streamsFlag
-	if *cFlag != 16 {
-		concurrentStreams = *cFlag
-	}
-	
-	// Handle Duration
-	durSec := *durationFlag
-	if *dFlag != 10 {
-		durSec = *dFlag
-	}
-	testDuration = time.Duration(durSec) * time.Second
+targetHost = *hostFlag
+targetPort = *portFlag
+concurrentStreams = *streamsFlag
+testDuration = time.Duration(*durationFlag) * time.Second
 
-	if *iFlag {
-		fmt.Print("Enter Host (default localhost): ")
-		var h string
-		fmt.Scanln(&h)
-		if h != "" { targetHost = h }
-		
-		fmt.Print("Enter Port (default 8080): ")
-		var p int
-		if _, err := fmt.Scanln(&p); err == nil { targetPort = p }
+runCLIClient()
+}
 
-		fmt.Print("Enter Streams (default 16): ")
-		var s int
-		if _, err := fmt.Scanln(&s); err == nil { concurrentStreams = s }
-		
-		fmt.Print("Enter Duration (s) (default 10): ")
-		var d int
-		if _, err := fmt.Scanln(&d); err == nil { testDuration = time.Duration(d) * time.Second }
-	}
 func runCLIClient() {
 url := fmt.Sprintf("ws://%s:%d/control", targetHost, targetPort)
 fmt.Printf("Connecting to %s...\n", url)
