@@ -6,7 +6,6 @@ WORKDIR /app
 # Copy source code first, then fetch dependencies inside the container
 # because the local environment might not have Go installed to update go.mod locally.
 COPY server .
-RUN go get github.com/gorilla/websocket
 RUN go build -o hyperspeed-server main.go
 
 # Run stage
@@ -16,5 +15,8 @@ WORKDIR /app
 COPY --from=builder /app/hyperspeed-server .
 COPY --from=builder /app/static ./static
 
+# Default port (can be overridden with SERVER_PORT env var)
+ENV SERVER_PORT=8080
 EXPOSE 8080
+
 CMD ["./hyperspeed-server"]

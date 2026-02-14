@@ -1,4 +1,3 @@
-let ws;
 let chart;
 const downloadEl = document.getElementById('download-speed');
 const uploadEl = document.getElementById('upload-speed');
@@ -10,36 +9,6 @@ const dlGroup = document.querySelector('.gauge-group.download');
 const ulGroup = document.querySelector('.gauge-group.upload');
 const dlBar = document.getElementById('dl-bar');
 const ulBar = document.getElementById('ul-bar');
-
-function connect() {
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const wsUrl = `${proto}://${window.location.host}/control`;
-    
-    ws = new WebSocket(wsUrl);
-    
-    ws.onopen = () => {
-        statusEl.textContent = 'AGENT CONNECTED';
-        statusEl.style.color = '#34d399';
-        btn.disabled = false;
-        btn.querySelector('span').textContent = 'INITIATE TEST';
-    };
-    
-    ws.onclose = () => {
-        statusEl.textContent = 'CONNECTION LOST - RETRYING...';
-        statusEl.style.color = '#ef4444';
-        btn.disabled = true;
-        setTimeout(connect, 2000);
-    };
-    
-    ws.onmessage = (event) => {
-        try {
-            const msg = JSON.parse(event.data);
-            handleMessage(msg);
-        } catch (e) {
-            console.error(e);
-        }
-    };
-}
 
 function initChart() {
     const ctx = document.getElementById('speedChart').getContext('2d');
@@ -57,7 +26,7 @@ function initChart() {
     chart = new Chart(ctx, {
         type: 'line',
         data: {
-            labels: [], // Time points
+            labels: [], 
             datasets: [
                 {
                     label: 'Download',
@@ -90,22 +59,12 @@ function initChart() {
                 mode: 'index',
             },
             plugins: {
-                legend: {
-                    display: false
-                },
-                tooltip: {
-                    enabled: false
-                }
+                legend: { display: false },
+                tooltip: { enabled: false }
             },
             scales: {
-                x: {
-                    display: false
-                },
-                y: {
-                    display: false,
-                    min: 0,
-                    suggestedMax: 100 // Visual baseline
-                }
+                x: { display: false },
+                y: { display: false, min: 0 }
             }
         }
     });
@@ -113,12 +72,9 @@ function initChart() {
 
 function updateChart(type, speed) {
     if (!chart) return;
-    
     const now = new Date().toLocaleTimeString();
     chart.data.labels.push(now);
     
-    // Allow graph to grow to show full history (Download then Upload)
-    // Limit to 2000 points to prevent extreme memory usage on very long tests
     if (chart.data.labels.length > 2000) {
         chart.data.labels.shift();
         chart.data.datasets[0].data.shift();
@@ -127,7 +83,7 @@ function updateChart(type, speed) {
 
     if (type === 'download') {
         chart.data.datasets[0].data.push(speed);
-        chart.data.datasets[1].data.push(null); // Keep sync
+        chart.data.datasets[1].data.push(null); 
     } else {
         chart.data.datasets[0].data.push(null);
         chart.data.datasets[1].data.push(speed);
@@ -136,110 +92,234 @@ function updateChart(type, speed) {
     chart.update();
 }
 
-function handleMessage(msg) {
-    // Keep ping/jitter live during test
-    if (msg.ping > 0) {
-        pingEl.textContent = msg.ping.toFixed(1);
-    }
-    if (msg.jitter > 0) {
-        jitterEl.textContent = msg.jitter.toFixed(1);
+// -----------------------------------------------------------
+// Network Test Logic (Browser Side)
+// -----------------------------------------------------------
+
+let isRunning = false;
+let testController = null;
+
+// Ping Test
+async function runPingTest(count = 20) {
+    statusEl.textContent = 'CHECKING LATENCY...';
+    pingEl.innerHTML = '<span class="loading-dots">...</span>';
+    
+    const latencies = [];
+    const url = '/ping?' + Date.now(); // Cache bust
+
+    for (let i = 0; i < count; i++) {
+        const start = performance.now();
+        try {
+            await fetch(url, { method: 'HEAD', cache: 'no-store' });
+            const end = performance.now();
+            latencies.push(end - start);
+        } catch (e) {
+            console.error('Ping failed', e);
+        }
+        await new Promise(r => setTimeout(r, 50));
     }
 
-    // Handle Detailed Final Stats if available in "complete" state
-    if (msg.state === 'complete' && msg.type !== 'ping') {
-         // We will accumulate stats in global variables or just show the last phase's stats?
-         // The user asked for "final results". 
-         // Let's create a summary display or override the live values with the summary.
-         
-         const summaryHTML = `
-            <div class="stat-detail-row">
-                <span>Avg: ${msg.pingAvg.toFixed(1)}</span>
-                <span class="muted">Min: ${msg.pingMin.toFixed(1)}</span>
-                <span class="muted">Max: ${msg.pingMax.toFixed(1)}</span>
-            </div>
-         `;
-         
-         // Identify which phase completed and update a specific area or just log it for now?
-         // The request is "final results must show...".
-         // The UI has PING and JITTER boxes. We can expand them on completion.
-         
-         // Update the main display to show avg, but maybe add a tooltip or small text for min/max?
-         // Let's modify the Ping Box content
-         
-         if (msg.pingAvg > 0) {
-            pingEl.innerHTML = `${msg.pingAvg.toFixed(1)}<div class="stat-sub">Min ${msg.pingMin.toFixed(0)} / Max ${msg.pingMax.toFixed(0)}</div>`;
-            // Also update Jitter to show Max
-            jitterEl.innerHTML = `${msg.jitter.toFixed(1)}<div class="stat-sub">Max ${msg.jitterMax.toFixed(1)}</div>`;
-         }
-    }
+    if (latencies.length === 0) return { avg: 0, jitter: 0 };
 
-    if (msg.type === 'ping') {
-        if (msg.state === 'running') {
-            statusEl.textContent = 'CHECKING LATENCY...';
-            statusEl.style.color = '#f4f4f5';
-        } else if (msg.state === 'starting') {
-            pingEl.textContent = '--';
-            jitterEl.textContent = '--';
-            statusEl.textContent = 'INITIALIZING PING TEST...';
-        }
-    } else if (msg.type === 'download') {
-        if (msg.state === 'running') {
-            downloadEl.textContent = msg.speed.toFixed(2);
-            dlGroup.classList.add('active');
-            statusEl.textContent = 'PHASE 1: DOWNLOAD BENCHMARK';
-            statusEl.style.color = '#f4f4f5';
-            
-            const pct = Math.min((msg.speed / 100) * 100, 100);
-            dlBar.style.width = `${pct}%`;
-            
-            updateChart('download', msg.speed);
-            
-        } else if (msg.state === 'complete') {
-            dlGroup.classList.remove('active');
-            statusEl.textContent = 'DOWNLOAD PHASE COMPLETE';
-        } else if (msg.state === 'starting') {
-            downloadEl.textContent = '0.00';
-            dlBar.style.width = '0%';
-            statusEl.textContent = 'INITIALIZING DOWNLOAD...';
-        }
-    } else if (msg.type === 'upload') {
-        if (msg.state === 'running') {
-            uploadEl.textContent = msg.speed.toFixed(2);
-            ulGroup.classList.add('active');
-            statusEl.textContent = 'PHASE 2: UPLOAD BENCHMARK';
-            
-            const pct = Math.min((msg.speed / 100) * 100, 100);
-            ulBar.style.width = `${pct}%`;
-            
-            updateChart('upload', msg.speed);
+    // Calculate details
+    let min = Infinity;
+    let max = 0;
+    let sum = 0;
+    
+    latencies.forEach(l => {
+        sum += l;
+        if (l < min) min = l;
+        if (l > max) max = l;
+    });
+    
+    const avg = sum / latencies.length;
+    
+    // Jitter = Max - Min
+    const jitter = max - min;
 
-        } else if (msg.state === 'complete') {
-            ulGroup.classList.remove('active');
-            statusEl.textContent = 'UPLOAD PHASE COMPLETE';
-        } else if (msg.state === 'starting') {
-            uploadEl.textContent = '0.00';
-            ulBar.style.width = '0%';
-            statusEl.textContent = 'INITIALIZING UPLOAD...';
-        }
-    } else if (msg.type === 'done') {
-        statusEl.textContent = 'BENCHMARK COMPLETED SUCCESSFULLY';
-        statusEl.style.color = '#34d399';
-        btn.disabled = false;
-        btn.querySelector('span').textContent = 'RESTART TEST';
-    } else if (msg.type === 'error') {
-        statusEl.textContent = 'ERROR: ' + msg.message;
-        statusEl.style.color = '#ef4444';
-        btn.disabled = false;
-    }
+    // Display Result
+    pingEl.innerHTML = `${avg.toFixed(1)}<div class="stat-sub">Min ${min.toFixed(0)} / Max ${max.toFixed(0)}</div>`;
+    jitterEl.innerHTML = `${jitter.toFixed(1)}<div class="stat-sub">Idle</div>`;
+    
+    return { avg, jitter };
 }
 
-function startTest() {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    
-    // Get params
-    const streams = parseInt(document.getElementById('streams').value);
-    const duration = parseInt(document.getElementById('duration').value);
+// Loaded Latency Monitor
+function startLoadedLatencyMonitor(controller, updateCallback) {
+    const url = '/ping?' + Date.now();
+    let windowData = [];
+    let minMaxJitter = 0;
 
+    const loop = async () => {
+        while (!controller.signal.aborted) {
+            const start = performance.now();
+            try {
+                await fetch(url, { method: 'HEAD', cache: 'no-store', signal: controller.signal });
+                const end = performance.now();
+                const lat = end - start;
+                
+                // Jitter window
+                windowData.push(lat);
+                if (windowData.length > 10) windowData.shift();
+                
+                let min = Infinity;
+                let max = 0;
+                windowData.forEach(l => {
+                    if (l < min) min = l;
+                    if (l > max) max = l;
+                });
+                const curJitter = windowData.length > 1 ? (max - min) : 0;
+                if (curJitter > minMaxJitter) minMaxJitter = curJitter;
+
+                updateCallback(lat, curJitter, minMaxJitter);
+
+            } catch (e) {
+                // likely aborted or timeout
+            }
+            if (!controller.signal.aborted) {
+                await new Promise(r => setTimeout(r, 200));
+            }
+        }
+    };
+    loop();
+}
+
+async function runDownloadTest(streams, duration) {
+    statusEl.textContent = 'PHASE 1: DOWNLOAD BENCHMARK';
+    dlGroup.classList.add('active');
+    
+    const controller = new AbortController();
+    testController = controller;
+    const start = performance.now();
+    let bytesLoaded = 0;
+    
+    // Monitor Ping
+    startLoadedLatencyMonitor(controller, (lat, jit, maxJit) => {
+        pingEl.textContent = lat.toFixed(1);
+        jitterEl.textContent = jit.toFixed(1);
+    });
+
+    const tasks = [];
+    for (let i = 0; i < streams; i++) {
+        tasks.push(new Promise(async (resolve) => {
+           while (!controller.signal.aborted) {
+               try {
+                   const response = await fetch('/download', { signal: controller.signal });
+                   const reader = response.body.getReader();
+                   while (true) {
+                       const { done, value } = await reader.read();
+                       if (done) break;
+                       bytesLoaded += value.length;
+                       
+                       // Check time locally to abort streams early
+                       if (performance.now() - start > duration * 1000) {
+                           controller.abort();
+                           break;
+                       }
+                   }
+               } catch (e) {
+                   break;
+               }
+           }
+           resolve();
+        }));
+    }
+
+    // Update loop
+    const interval = setInterval(() => {
+        const now = performance.now();
+        const dur = (now - start) / 1000;
+        if (dur > 0) {
+            const gbps = (bytesLoaded * 8) / (dur * 1e9);
+            downloadEl.textContent = gbps.toFixed(2);
+            updateChart('download', gbps);
+            const pct = Math.min((gbps / 1) * 10, 100); // Visual scale
+            dlBar.style.width = `${pct}%`;
+        }
+    }, 100);
+
+    // Timeout
+    setTimeout(() => {
+        controller.abort();
+    }, duration * 1000);
+
+    await Promise.all(tasks);
+    clearInterval(interval);
+    
+    dlGroup.classList.remove('active');
+    return (bytesLoaded * 8) / (duration * 1e9);
+}
+
+async function runUploadTest(streams, duration) {
+    statusEl.textContent = 'PHASE 2: UPLOAD BENCHMARK';
+    ulGroup.classList.add('active');
+    
+    const controller = new AbortController();
+    testController = controller;
+    const start = performance.now();
+    let bytesUploaded = 0;
+    
+    // Monitor Ping
+    startLoadedLatencyMonitor(controller, (lat, jit, maxJit) => {
+        pingEl.textContent = lat.toFixed(1);
+        jitterEl.textContent = jit.toFixed(1);
+    });
+    
+    // Create payload (1MB garbage)
+    const chunkSize = 1024 * 1024;
+    const payload = new Uint8Array(chunkSize);
+    for(let i=0; i<chunkSize; i++) payload[i] = i % 256;
+
+    const tasks = [];
+    
+    // Using XHR for upload events could be clearer but Fetch loop works for throughput
+    for (let i = 0; i < streams; i++) {
+        tasks.push(new Promise(async (resolve) => {
+            while (!controller.signal.aborted) {
+                try {
+                    await fetch('/upload', { 
+                        method: 'POST', 
+                        body: payload, 
+                        signal: controller.signal 
+                    });
+                    bytesUploaded += chunkSize;
+                    
+                    if (performance.now() - start > duration * 1000) {
+                        controller.abort();
+                        break;
+                    }
+                } catch (e) { break; }
+            }
+            resolve();
+        }));
+    }
+
+    const interval = setInterval(() => {
+        const now = performance.now();
+        const dur = (now - start) / 1000;
+        if (dur > 0) {
+            const gbps = (bytesUploaded * 8) / (dur * 1e9);
+            uploadEl.textContent = gbps.toFixed(2);
+            updateChart('upload', gbps);
+            const pct = Math.min((gbps / 1) * 10, 100); 
+            ulBar.style.width = `${pct}%`;
+        }
+    }, 100);
+
+    setTimeout(() => { controller.abort(); }, duration * 1000);
+
+    await Promise.all(tasks);
+    clearInterval(interval);
+    
+    ulGroup.classList.remove('active');
+    return (bytesUploaded * 8) / (duration * 1e9);
+}
+
+async function startTest() {
+    if (isRunning) return;
+    isRunning = true;
+    btn.disabled = true;
+    
     // Reset UI
     downloadEl.textContent = '0.00';
     uploadEl.textContent = '0.00';
@@ -248,7 +328,6 @@ function startTest() {
     dlBar.style.width = '0%';
     ulBar.style.width = '0%';
     
-    // Reset Chart
     if (chart) {
         chart.data.labels = [];
         chart.data.datasets[0].data = [];
@@ -256,32 +335,36 @@ function startTest() {
         chart.update();
     }
     
-    btn.disabled = true;
-    btn.querySelector('span').textContent = 'TEST IN PROGRESS...';
-    
-    const config = {
-        command: 'start',
-        host: '127.0.0.1', 
-        port: 8080,
-        streams: streams,
-        duration: duration
-    };
+    const streams = parseInt(document.getElementById('streams').value) || 4; // Browser limit usually lower
+    const duration = parseInt(document.getElementById('duration').value) || 10;
 
-    ws.send(JSON.stringify(config));
+    try {
+        await runPingTest();
+        
+        await runDownloadTest(Math.min(streams, 8), duration);
+        await new Promise(r => setTimeout(r, 500));
+        
+        await runUploadTest(Math.min(streams, 8), duration);
+        
+        statusEl.textContent = 'BENCHMARK COMPLETED';
+        statusEl.style.color = '#34d399';
+    } catch (e) {
+        statusEl.textContent = 'ERROR OCCURRED';
+        statusEl.style.color = '#ef4444';
+        console.error(e);
+    } finally {
+        isRunning = false;
+        btn.disabled = false;
+        btn.querySelector('span').textContent = 'RESTART TEST';
+    }
 }
 
 function toggleSettings() {
     const panel = document.getElementById('settings-panel');
     panel.classList.toggle('hidden');
-    
     const btnText = document.querySelector('.settings-toggle span');
-    if (panel.classList.contains('hidden')) {
-        btnText.textContent = "Advanced Configuration";
-    } else {
-        btnText.textContent = "Hide Configuration";
-    }
+    btnText.textContent = panel.classList.contains('hidden') ? "Advanced Configuration" : "Hide Configuration";
 }
 
-// Initializers
-connect();
+// Init
 initChart();
